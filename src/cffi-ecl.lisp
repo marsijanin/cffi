@@ -61,7 +61,7 @@
 
 ;;;# Mis-features
 
-(pushnew 'no-long-long *features*)
+#-uint64-t(pushnew 'no-long-long *features*)
 (pushnew 'flat-namespace *features*)
 
 ;;;# Symbol Case
@@ -133,9 +133,45 @@ SIZE-VAR is supplied, it will be bound to SIZE during BODY."
 WITH-POINTER-TO-VECTOR-DATA."
   (make-array size :element-type '(unsigned-byte 8)))
 
+;;; si:make-foreign-data-from-array can return pointer
+;;; to the vector data, but for a few types
+(defun %vector-address (vector)
+  "Return the address of VECTOR's data."
+  (si:make-foreign-data-from-array vector))
+
+;;; ECL, built with the Boehm GC never moves allocated data, so this
+;;; isn't nearly as hard to do. In fact, we support a bunch of vector
+;;; types that other backends don't, but such possibility available
+;;; only at compile time, not at run time
+(define-compiler-macro %vector-address (vector)
+  "Return the address of VECTOR's data."
+  `(progn
+     (check-type ,vector
+		 (or (vector (unsigned-byte 8))
+		     (vector (signed-byte 8))
+		     #+uint16-t (vector (unsigned-byte 16))
+		     #+uint16-t (vector (signed-byte 16))
+		     #+uint32-t (vector (unsigned-byte 32))
+		     #+uint32-t (vector (signed-byte 32))
+		     #+uint64-t (vector (unsigned-byte 64))
+		     #+uint64-t (vector (signed-byte 64))
+		     (vector single-float)
+		     (vector double-float)
+		     (vector bit)
+		     (vector base-char)
+		     #+unicode (vector character)))
+     ;; ecl_array_data is a union, so we don't have to pick the specific
+     ;; fields out of it, so long as we know the array has the expected
+     ;; type.
+     (make-pointer
+      (ffi:c-inline (,vector) (object) :unsigned-long
+                    "(unsigned long) #0->vector.self.b8"
+                    :side-effects nil
+                    :one-liner t))))
+
 (defmacro with-pointer-to-vector-data ((ptr-var vector) &body body)
   "Bind PTR-VAR to a foreign pointer to the data in VECTOR."
-  `(let ((,ptr-var (si:make-foreign-data-from-array ,vector)))
+  `(let ((,ptr-var (%vector-address ,vector)))
      ,@body))
 
 ;;;# Type Operations
@@ -149,10 +185,10 @@ WITH-POINTER-TO-VECTOR-DATA."
     (:unsigned-int    :unsigned-int    "unsigned int")
     (:long            :long            "long")
     (:unsigned-long   :unsigned-long   "unsigned long")
-    #+long-long
-    (:long-long       :long-long       "long long")
-    #+long-long
-    (:unsigned-long-long :unsigned-long-long "unsigned long long")
+    #+(or long-long uint64-t)
+    (:long-long       :int64-t         "long long")
+    #+(or long-long uint64-t)
+    (:unsigned-long-long :uint64-t "unsigned long long")
     (:float           :float           "float")
     (:double          :double          "double")
     (:pointer         :pointer-void    "void*")

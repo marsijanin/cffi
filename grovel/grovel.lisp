@@ -266,8 +266,11 @@ int main(int argc, char**argv) {
     (when library
       ;; if it's a library that may be used, remove it
       ;; so we won't possibly be overwriting the code of any existing process
-      (ignore-some-conditions (file-error)
-        (delete-file output-file)))
+      ;; trying to delete non existing file is not an condition
+      ;; of type `file-error' on all lisps
+      (ignore-errors
+        (when (probe-file output-file)
+          (delete-file output-file))))
     (apply #'invoke arglist)))
 
 ;;; *PACKAGE* is rebound so that the IN-PACKAGE form can set it during
